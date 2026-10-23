@@ -1,0 +1,375 @@
+#include <Servo.h>
+
+// ============================================================
+// 1. PINOS — ajustar conforme a montagem real do ECOBOT
+// ============================================================
+
+const int PIN_TRIG = 7;   // HC-SR04 - trigger
+const int PIN_ECHO = 8;   // HC-SR04 - echo
+
+const int PIN_RODA_ESQ  = 9;   // MG996R 360° - roda esquerda
+const int PIN_RODA_DIR  = 10;  // MG996R 360° - roda direita
+const int PIN_CABECA    = 11;  // MG995 180°  - cabeça
+const int PIN_BRACO_ESQ = 12;  // MG995 180°  - braço esquerdo
+const int PIN_BRACO_DIR = 13;  // MG995 180°  - braço direito
+
+const int PIN_LED_VERMELHO = 2; // linha/fita de LED vermelho
+const int PIN_LED_AZUL     = 3; // linha/fita de LED azul
+const int PIN_LED_VERDE    = 4; // linha/fita de LED verde
+
+// ============================================================
+// 2. OBJETOS SERVO
+// ============================================================
+
+Servo rodaEsq;
+Servo rodaDir;
+Servo cabeca;
+Servo bracoEsq;
+Servo bracoDir;
+
+// ============================================================
+// 3. DISTÂNCIAS DE REFERÊNCIA (cm) — CALIBRAR FISICAMENTE
+// ============================================================
+
+const int X1 = 20;   // distância de detecção de uma aproximação válida
+const int X2 = 8;    // distância de parada durante o deslocamento (menor que X1)
+
+// ============================================================
+// 4. VALORES DOS SERVOS CONTÍNUOS DAS RODAS (MG996R) — CALIBRAR
+//    90 é o pulso neutro (parado) na maioria dos servos de
+//    rotação contínua. Ajustar os valores de "frente" conforme
+//    o sentido de montagem de cada roda.
+// ============================================================
+
+const int RODA_PARADA     = 90;
+const int RODA_FRENTE_ESQ = 180; // roda esquerda girando para frente
+const int RODA_FRENTE_DIR = 0;   // roda direita girando para frente (sentido oposto)
+
+// ============================================================
+// 5. POSIÇÕES DA CABEÇA (MG995 180°)
+// ============================================================
+
+const int CABECA_ESQUERDA = 45;
+const int CABECA_DIREITA  = 135;
+const int CABECA_CENTRO   = 90;
+
+// ============================================================
+// 6. POSIÇÕES DOS BRAÇOS (MG995 180°) — CALIBRAR FISICAMENTE
+//    O braço direito é espelhado automaticamente em relação ao
+//    esquerdo (ver função moverBracos). Ajustar ESPELHAR_BRACO_DIR
+//    conforme a montagem real dos dois braços.
+// ============================================================
+
+const bool ESPELHAR_BRACO_DIR = true;
+
+const int BRACO_NEUTRO     = 0;
+const int BRACO_APROXIMA   = 45;
+const int BRACO_ENCAIXE    = 70;
+const int BRACO_LEVANTA    = 120;
+const int BRACO_COLOCA     = 60;
+
+// ============================================================
+// 7. MÁQUINA DE ESTADOS
+// ============================================================
+
+enum EstadoECOBOT {
+  AGUARDANDO,
+  DETECCAO,
+  INSPECAO,
+  LOCOMOCAO,
+  PARADA,
+  MANIPULACAO,
+  FINALIZACAO
+};
+
+EstadoECOBOT estadoAtual = AGUARDANDO;
+
+// ============================================================
+// 8. VARIÁVEIS DE CONTROLE DA MISSÃO
+// ============================================================
+
+bool armado          = true;  // pronto para reconhecer uma nova aproximação
+bool chegouPertoDaLata = false; // true depois da 1ª sequência (percepção + deslocamento)
+bool missaoConcluida   = false; // true depois da 2ª sequência (manipulação) — o robô para de reagir
+
+unsigned long ultimaLeitura = 0;
+const unsigned long INTERVALO_LEITURA = 100; // ms entre leituras do sensor em AGUARDANDO
+
+const bool DEBUG = true; // enviar mensagens pela Serial para ajudar na calibração
+
+// ============================================================
+// 9. SETUP
+// ============================================================
+
+void setup() {
+  if (DEBUG) Serial.begin(9600);
+
+  pinMode(PIN_TRIG, OUTPUT);
+  pinMode(PIN_ECHO, INPUT);
+
+  pinMode(PIN_LED_VERMELHO, OUTPUT);
+  pinMode(PIN_LED_AZUL, OUTPUT);
+  pinMode(PIN_LED_VERDE, OUTPUT);
+
+  rodaEsq.attach(PIN_RODA_ESQ);
+  rodaDir.attach(PIN_RODA_DIR);
+  cabeca.attach(PIN_CABECA);
+  bracoEsq.attach(PIN_BRACO_ESQ);
+  bracoDir.attach(PIN_BRACO_DIR);
+
+  posicaoInicial();
+}
+
+// ============================================================
+// 10. LOOP PRINCIPAL — só decide qual rotina rodar
+// ============================================================
+
+void loop() {
+  switch (estadoAtual) {
+    case AGUARDANDO:
+      rotinaAguardando();
+      break;
+    case DETECCAO:
+      rotinaDeteccao();
+      break;
+    case INSPECAO:
+      rotinaInspecao();
+      break;
+    case LOCOMOCAO:
+      rotinaLocomocao();
+      break;
+    case PARADA:
+      rotinaParada();
+      break;
+    case MANIPULACAO:
+      rotinaManipulacao();
+      break;
+    case FINALIZACAO:
+      rotinaFinalizacao();
+      break;
+  }
+}
+
+// ============================================================
+// 11. ROTINAS DE CADA ESTADO
+// ============================================================
+
+// ---- AGUARDANDO ----
+// Único estado em que o sensor é lido para reconhecer uma NOVA
+// aproximação. Enquanto qualquer outra rotina está rodando, o
+// programa não passa por aqui — por isso uma mesma aproximação
+// nunca ativa duas sequências.
+void rotinaAguardando() {
+  ledAzul();
+
+  if (missaoConcluida) {
+    return; // já recolheu a lata: não reage mais a aproximações
+  }
+
+  if (millis() - ultimaLeitura < INTERVALO_LEITURA) {
+    return; // ainda não é hora de ler o sensor de novo
+  }
+  ultimaLeitura = millis();
+
+  int distancia = medirDistanciaCM();
+  if (DEBUG) {
+    Serial.print("AGUARDANDO | distancia: ");
+    Serial.print(distancia);
+    Serial.print(" cm | armado: ");
+    Serial.println(armado);
+  }
+
+  if (!armado) {
+    // ainda esperando a pessoa se afastar para poder rearmar
+    if (distancia < 0 || distancia > X1) {
+      armado = true;
+    }
+    return;
+  }
+
+  // armado: pode reconhecer uma nova aproximação válida
+  if (distancia > 0 && distancia <= X1) {
+    // segunda leitura de confirmação, para reduzir ruído do sensor
+    delay(60);
+    int confirmacao = medirDistanciaCM();
+    if (confirmacao > 0 && confirmacao <= X1) {
+      armado = false; // bloqueia novas detecções até o próximo afastamento
+
+      if (!chegouPertoDaLata) {
+        // 1ª interação de proximidade: percepção + deslocamento
+        estadoAtual = DETECCAO;
+      } else {
+        // 2ª interação de proximidade: manipulação da lata
+        estadoAtual = MANIPULACAO;
+      }
+    }
+  }
+}
+
+// ---- DETECCAO (Recurso 2) ----
+// Reação instantânea e visível à aproximação: olhos ficam vermelhos.
+void rotinaDeteccao() {
+  ledVermelho();
+  if (DEBUG) Serial.println("DETECCAO -> reagiu a aproximacao");
+  delay(300); // pequena pausa para a reação ser perceptível ao público
+  estadoAtual = INSPECAO;
+}
+
+// ---- INSPECAO (Recurso 3) ----
+// Varredura da cabeça: 45º (esquerda) -> 135º (direita) -> 90º (centro).
+void rotinaInspecao() {
+  if (DEBUG) Serial.println("INSPECAO -> varredura da cabeca");
+  cabeca.write(CABECA_ESQUERDA);
+  delay(500);
+  cabeca.write(CABECA_DIREITA);
+  delay(700);
+  cabeca.write(CABECA_CENTRO);
+  delay(500);
+  estadoAtual = LOCOMOCAO;
+}
+
+// ---- LOCOMOCAO (Recurso 1) ----
+// Anda reto até a lata. Não usa tempo/distância fixos: o próprio
+// sensor, olhando para frente, mede a distância continuamente e
+// o robô para sozinho quando a leitura atinge X2.
+void rotinaLocomocao() {
+  if (DEBUG) Serial.println("LOCOMOCAO -> avancando ate detectar X2");
+  moverRodasParaFrente();
+  ledVermelho(); // reforça visualmente que o robô está em ação
+
+  int distancia = medirDistanciaCM();
+  while (distancia < 0 || distancia > X2) {
+    delay(60); // intervalo mínimo recomendado entre leituras do HC-SR04
+    distancia = medirDistanciaCM();
+  }
+
+  pararRodas();
+  if (DEBUG) {
+    Serial.print("LOCOMOCAO -> parou a ");
+    Serial.print(distancia);
+    Serial.println(" cm da lata");
+  }
+  estadoAtual = PARADA;
+}
+
+// ---- PARADA ----
+// Encerra a 1ª sequência. Volta para AGUARDANDO, mas já marcado
+// como "perto da lata" — a próxima aproximação vai direto para a
+// manipulação, não para uma nova detecção/inspeção.
+void rotinaParada() {
+  cabeca.write(CABECA_CENTRO);
+  ledAzul();
+  chegouPertoDaLata = true;
+  if (DEBUG) Serial.println("PARADA -> aguardando 2a aproximacao (coleta)");
+  estadoAtual = AGUARDANDO;
+}
+
+// ---- MANIPULACAO (Recurso 4 — momento de assinatura) ----
+// Sequência coreografada: aproxima -> encaixa -> levanta -> destaque
+// -> coloca -> retorna. Nenhum movimento de roda acontece aqui.
+void rotinaManipulacao() {
+  if (DEBUG) Serial.println("MANIPULACAO -> sequencia da lata");
+
+  moverBracos(BRACO_APROXIMA);
+  delay(400);
+
+  moverBracos(BRACO_ENCAIXE);
+  delay(400);
+
+  moverBracos(BRACO_LEVANTA);
+  delay(500);
+
+  // pequeno movimento de destaque evidenciando a conquista
+  cabeca.write(CABECA_ESQUERDA);
+  delay(200);
+  cabeca.write(CABECA_CENTRO);
+  delay(200);
+
+  ledVerde(); // sucesso — lata levantada
+
+  moverBracos(BRACO_COLOCA);
+  delay(400);
+
+  moverBracos(BRACO_NEUTRO);
+  delay(400);
+
+  estadoAtual = FINALIZACAO;
+}
+
+// ---- FINALIZACAO ----
+// Fecha a apresentação em pose estável e trava novas reações,
+// para o robô não responder por engano durante o fechamento.
+void rotinaFinalizacao() {
+  ledVerde();
+  missaoConcluida = true;
+  if (DEBUG) Serial.println("FINALIZACAO -> missao concluida");
+  estadoAtual = AGUARDANDO;
+}
+
+// ============================================================
+// 12. FUNÇÕES AUXILIARES
+// ============================================================
+
+// Mede a distância em centímetros usando o HC-SR04.
+// Retorna -1 se a leitura for inválida (fora de alcance/erro).
+int medirDistanciaCM() {
+  digitalWrite(PIN_TRIG, LOW);
+  delayMicroseconds(2);
+  digitalWrite(PIN_TRIG, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(PIN_TRIG, LOW);
+
+  long duracao = pulseIn(PIN_ECHO, HIGH, 30000); // timeout de 30 ms (~5 m)
+  if (duracao == 0) {
+    return -1; // nenhum eco recebido dentro do tempo limite
+  }
+
+  int distanciaCM = duracao / 58; // conversão padrão do HC-SR04
+  return distanciaCM;
+}
+
+void moverRodasParaFrente() {
+  rodaEsq.write(RODA_FRENTE_ESQ);
+  rodaDir.write(RODA_FRENTE_DIR);
+}
+
+void pararRodas() {
+  rodaEsq.write(RODA_PARADA);
+  rodaDir.write(RODA_PARADA);
+}
+
+// Move os dois braços de forma simétrica. O braço direito é
+// espelhado automaticamente (180 - posicaoBase) se
+// ESPELHAR_BRACO_DIR estiver true — ajustar conforme a montagem.
+void moverBracos(int posicaoBase) {
+  bracoEsq.write(posicaoBase);
+  int posicaoDir = ESPELHAR_BRACO_DIR ? (180 - posicaoBase) : posicaoBase;
+  bracoDir.write(posicaoDir);
+}
+
+void ledVermelho() {
+  digitalWrite(PIN_LED_VERMELHO, HIGH);
+  digitalWrite(PIN_LED_AZUL, LOW);
+  digitalWrite(PIN_LED_VERDE, LOW);
+}
+
+void ledAzul() {
+  digitalWrite(PIN_LED_VERMELHO, LOW);
+  digitalWrite(PIN_LED_AZUL, HIGH);
+  digitalWrite(PIN_LED_VERDE, LOW);
+}
+
+void ledVerde() {
+  digitalWrite(PIN_LED_VERMELHO, LOW);
+  digitalWrite(PIN_LED_AZUL, LOW);
+  digitalWrite(PIN_LED_VERDE, HIGH);
+}
+
+// Posição segura de início: rodas paradas, cabeça no centro,
+// braços neutros, olhos em repouso (azul).
+void posicaoInicial() {
+  pararRodas();
+  cabeca.write(CABECA_CENTRO);
+  moverBracos(BRACO_NEUTRO);
+  ledAzul();
+}
