@@ -1,0 +1,2 @@
+ python .\emocoes.py   
+ python .\gestos.py
