@@ -1,1319 +1,599 @@
-
 #include <Servo.h>
 
 // ============================================================
-// ECOBOT - BLUE ROBOTICS LEAGUE (BRL)
-// VERSAO 1.1
-// APRESENTACAO INTERATIVA COM LOOP AUTOMATICO
+// ECOBOT - BRL / BLUE SCHOOL
+// Versao 2.1 - pausas entre etapas, deslocamento mais lento
+// e braco direito espelhado em relacao ao esquerdo.
 // ============================================================
 
+// -------------------- 1. PINAGEM -----------------------------
+const byte PIN_TRIG = 7;
+const byte PIN_ECHO = 8;
 
-// ============================================================
-// 1. PINAGEM - BASE DEFINIDA PELA EQUIPE
-// ============================================================
+const byte PIN_RODA_ESQ = 9;
+const byte PIN_RODA_DIR = 10;
+const byte PIN_CABECA = 11;
+const byte PIN_BRACO_ESQ = 12;
+const byte PIN_BRACO_DIR = 13;
 
-// SENSOR ULTRASSONICO
-const int PIN_TRIG = 7;
-const int PIN_ECHO = 8;
+const byte PIN_LED_VERMELHO = 2;
+const byte PIN_LED_AZUL = 3;
+const byte PIN_LED_VERDE = 4;
 
-// RODAS - MG996R 360
-const int PIN_RODA_ESQ = 9;
-const int PIN_RODA_DIR = 10;
-
-// CABECA - MG995 180
-const int PIN_CABECA = 11;
-
-// BRACOS - MG995 180
-const int PIN_BRACO_ESQ = 12;
-const int PIN_BRACO_DIR = 13;
-
-// LEDS
-const int PIN_LED_VERMELHO = 2;
-const int PIN_LED_AZUL = 3;
-const int PIN_LED_VERDE = 4;
-
-
-// ============================================================
-// 2. OBJETOS DOS SERVOS
-// ============================================================
-
+// -------------------- 2. OBJETOS SERVO ------------------------
 Servo rodaEsq;
 Servo rodaDir;
-
 Servo cabeca;
-
 Servo bracoEsq;
 Servo bracoDir;
 
-
-// ============================================================
-// 3. CONFIGURACAO DO SENSOR
-// AJUSTAR DURANTE OS TESTES
-// ============================================================
-
-// Distancia para detectar a aproximacao do visitante.
-
-const float X1 = 20.0;
-
-// Referencia da base original.
-// Nao utilizada para parada durante o deslocamento,
-// pois o sensor esta nas costas, apontado para tras.
-
-const float X2 = 8.0;
-
-// Numero de leituras consecutivas para ativar.
-
-const int LEITURAS_PARA_ATIVAR = 3;
-
-// Intervalo entre leituras do sensor.
-
-const unsigned long INTERVALO_SENSOR_MS = 100;
-
-
-// ============================================================
-// 4. TEMPOS DA LOCOMOCAO
-// AJUSTAR DURANTE OS TESTES
-// ============================================================
-
-// Tempo que o robo anda para frente.
-
-const unsigned long TEMPO_AVANCO_MS = 2500;
-
-// Tempo que o robo anda de re.
-
-const unsigned long TEMPO_RETORNO_MS = 2500;
-
-// Distancia minima de seguranca durante o retorno.
-
-const float DISTANCIA_SEGURANCA_RETORNO_CM = 35.0;
-
-// Tempo que o caminho deve permanecer livre.
-
-const unsigned long TEMPO_CAMINHO_LIVRE_MS = 1000;
-
-// Tempo que o visitante precisa permanecer fora da
-// area de deteccao para o robo aceitar novo ciclo.
-
-const unsigned long TEMPO_REARME_MS = 1500;
-
-// Distancia adicional para confirmar que o visitante saiu.
-
-const float MARGEM_REARME_CM = 5.0;
-
-
-// ============================================================
-// 5. VELOCIDADE DAS RODAS
-// MG996R 360 - CALIBRAR FISICAMENTE
-// ============================================================
-
-// Parada individual das rodas.
-
-const int RODA_PARADA_ESQ = 90;
-const int RODA_PARADA_DIR = 90;
-
-// AVANCO
-// Valores herdados da base enviada.
-
-const int RODA_FRENTE_ESQ = 180;
-const int RODA_FRENTE_DIR = 0;
-
-// RETORNO
-// Sentidos opostos ao avanco.
-
-const int RODA_RE_ESQ = 0;
-const int RODA_RE_DIR = 180;
-
-
-// ============================================================
-// 6. CONFIGURACAO DA CABECA
-// MG995 180
-// ============================================================
-
-// Posicao central.
-
-const int ANG_CABECA_CENTRO = 90;
-
-// Inspecao.
-
-const int ANG_CABECA_ESQUERDA = 45;
-const int ANG_CABECA_DIREITA = 135;
-
-// Surpresa.
-
-const int ANG_CABECA_SURPRESA_ESQ = 65;
-const int ANG_CABECA_SURPRESA_DIR = 115;
-
-// Indignacao / raiva.
-
-const int ANG_CABECA_RAIVA_ESQ = 55;
-const int ANG_CABECA_RAIVA_DIR = 125;
-
-// Felicidade.
-
-const int ANG_CABECA_FELIZ_ESQ = 70;
-const int ANG_CABECA_FELIZ_DIR = 110;
-
-
-// TEMPOS DA CABECA
-
-const unsigned long TEMPO_CABECA_SURPRESA_MS = 450;
-
-const unsigned long TEMPO_CABECA_RAIVA_MS = 400;
-
-const unsigned long TEMPO_CABECA_INSPECAO_MS = 650;
-
-const unsigned long TEMPO_CABECA_FELIZ_MS = 400;
-
-const unsigned long TEMPO_CABECA_CENTRO_MS = 400;
-
-
-// ============================================================
-// 7. CONFIGURACAO DOS BRACOS
-// MG995 180
-// ============================================================
-
-// IMPORTANTE:
-// Os dois bracos estao conectados por uma estrutura de MDF.
-//
-// Os movimentos serao enviados juntos e gradualmente.
-//
-// O espelhamento deve ser confirmado na montagem real.
-
-const bool ESPELHAR_BRACO_DIR = true;
-
-// Ajuste fino do lado direito.
-
-const int AJUSTE_BRACO_DIR = 0;
-
-
-// POSICOES LOGICAS DOS BRACOS
-// Valores iniciais da base enviada.
-// Calibrar antes de colocar a lata.
-
-const int ANG_BRACO_NEUTRO = 0;
-
-const int ANG_BRACO_APROXIMA = 45;
-
-const int ANG_BRACO_ENCAIXE = 70;
-
-const int ANG_BRACO_LEVANTA = 120;
-
-const int ANG_BRACO_COLOCA = 60;
-
-
-// VELOCIDADE DOS BRACOS
-
-const int PASSO_BRACO_GRAUS = 1;
-
+// -------------------- 3. PARAMETROS DA APRESENTACAO -----------
+// Sensor instalado nas costas e apontado para tras.
+const float X1 = 20.0; // ativa a sequencia a 20 cm ou menos
+
+// Cabeca
+const int ANGULO_CABECA_FRENTE = 90;
+const int ANGULO_CABECA_ESQUERDA = 180;
+const int ANGULO_CABECA_DIREITA = 0;
+
+// Bracos: angulo logico do lado esquerdo.
+// O lado direito recebe automaticamente (180 - angulo esquerdo).
+const int ANGULO_BRACOS_BASE = 170;
+const int ANGULO_BRACOS_ESTENDIDO = 130;
+
+// Rodas MG996R 360 graus: comandos mais proximos de 90 = mais lentos.
+const int RODA_PARADA = 90;
+const int RODA_FRENTE_ESQ = 120;
+const int RODA_FRENTE_DIR = 50;
+const int RODA_RE_ESQ = 60;
+const int RODA_RE_DIR = 132;
+
+// Giro no proprio eixo, em velocidade reduzida.
+const int RODA_GIRO_DIREITA_ESQ = 120;
+const int RODA_GIRO_DIREITA_DIR = 120;
+const int RODA_GIRO_ESQUERDA_ESQ = 60;
+const int RODA_GIRO_ESQUERDA_DIR = 60;
+
+// -------------------- 4. TEMPOS DA SEQUENCIA ------------------
+const unsigned long TEMPO_OLHADA_LADO_MS = 1700;
+const unsigned long TEMPO_PAUSA_FRENTE_MS = 500;
+
+const unsigned long TEMPO_AVANCO_1_MS = 5500;
+const unsigned long TEMPO_AVANCO_2_MS = 3500;
+const unsigned long TEMPO_GIRO_MS = 3500; // direita e esquerda no retorno
+
+// Pausa aplicada entre cada etapa principal.
+// Altere este unico valor para deixar toda a apresentacao
+// mais pausada ou mais rapida.
+const unsigned long PAUSA_ENTRE_ETAPAS_MS = 500;
+
+// -------------------- 5. SENSOR E REARME -----------------------
+const unsigned long INTERVALO_LEITURA_MS = 100;
+const byte LEITURAS_PARA_CONFIRMAR = 2;
+const float DISTANCIA_REARME = 25.0;
+const unsigned long TEMPO_FORA_PARA_REARMAR_MS = 1500;
+
+// -------------------- 6. SUAVIDADE DOS SERVOS -----------------
+// Movimento gradual dos servos de posicao (cabeca e bracos).
+const byte PASSO_CABECA_GRAUS = 1;
+const unsigned long INTERVALO_PASSO_CABECA_MS = 12;
+const byte PASSO_BRACO_GRAUS = 1;
 const unsigned long INTERVALO_PASSO_BRACO_MS = 20;
-
-
-// ============================================================
-// 8. CONFIGURACAO DO LOOP
-// ============================================================
-
-// TRUE = retorna fisicamente ao ponto inicial.
-// FALSE = nao realiza o retorno.
-
-const bool FAZER_RETORNO_AO_INICIO = true;
-
-// Pausas das etapas.
-
-const unsigned long PAUSA_ANTES_COLETA_MS = 500;
-
-const unsigned long PAUSA_APOS_ENCAIXE_MS = 500;
-
-const unsigned long PAUSA_APOS_COLETA_MS = 700;
-
-const unsigned long TEMPO_POSE_FINAL_MS = 1000;
-
-
-// ============================================================
-// 9. DEBUG
-// ============================================================
+const unsigned long ASSENTAMENTO_BRACOS_MS = 250;
 
 const bool DEBUG = true;
 
-
-// ============================================================
-// 10. MAQUINA DE ESTADOS
-// TODOS OS ESTADOS POSSUEM O PREFIXO EST_
-// ============================================================
-
+// -------------------- 7. ESTADOS ------------------------------
 enum EstadoECOBOT {
-
-  EST_AGUARDANDO,
-
-  EST_DETECCAO,
-
-  EST_EMOCAO_RAIVA,
-
-  EST_INSPECAO,
-
-  EST_LOCOMOCAO,
-
-  EST_PARADA,
-
-  EST_BRACO_APROXIMACAO,
-
-  EST_BRACO_ENCAIXE,
-
-  EST_PAUSA_ENCAIXE,
-
-  EST_BRACO_LEVANTAMENTO,
-
-  EST_EMOCAO_FELIZ,
-
-  EST_BRACO_COLOCA,
-
-  EST_PAUSA_COLOCA,
-
-  EST_BRACO_NEUTRO,
-
-  EST_FINALIZACAO,
-
-  EST_AGUARDAR_CAMINHO_LIVRE,
-
-  EST_RETORNO,
-
-  EST_REARME
-
+  AGUARDANDO,
+  CENTRALIZANDO_CABECA,
+  AVANCO_INICIAL,
+  PAUSA_ETAPA,
+  ESTENDENDO_BRACOS,
+  GIRO_DIREITA,
+  SEGUNDO_AVANCO,
+  RECOLHENDO_BRACOS,
+  RETORNO_SEGUNDO_TRECHO,
+  GIRO_ESQUERDA,
+  RETORNO_TRECHO_INICIAL,
+  FINALIZANDO,
+  AGUARDANDO_VISITANTE_SAIR
 };
 
-
-// Estado inicial.
-
-EstadoECOBOT estadoAtual = EST_AGUARDANDO;
-
-
-// ============================================================
-// 11. VARIAVEIS DE CONTROLE
-// ============================================================
-
+EstadoECOBOT estado = AGUARDANDO;
+EstadoECOBOT proximoEstado = AGUARDANDO;
+unsigned long inicioEstado = 0;
 unsigned long tempoEstado = 0;
+bool acaoEstadoIniciada = false;
 
-unsigned long ultimaLeituraSensor = 0;
+// -------------------- 8. VARREDURA DA CABECA ------------------
+enum FaseVarredura {
+  IR_ESQUERDA,
+  PAUSAR_ESQUERDA,
+  VOLTAR_CENTRO_ESQUERDA,
+  PAUSAR_CENTRO_ESQUERDA,
+  IR_DIREITA,
+  PAUSAR_DIREITA,
+  VOLTAR_CENTRO_DIREITA,
+  PAUSAR_CENTRO_DIREITA
+};
 
-unsigned long tempoInicioMovimento = 0;
+FaseVarredura faseVarredura = IR_ESQUERDA;
+unsigned long inicioFaseVarredura = 0;
+bool comandoFaseEnviado = false;
 
-unsigned long tempoInicioRetorno = 0;
+// -------------------- 9. CONTROLE GRADUAL DA CABECA ------------
+int anguloCabecaAtual = ANGULO_CABECA_FRENTE;
+int anguloCabecaAlvo = ANGULO_CABECA_FRENTE;
+bool cabecaEmMovimento = false;
+unsigned long ultimoPassoCabeca = 0;
 
-unsigned long tempoRetornoRestante = 0;
+void moverCabecaPara(int angulo) {
+  anguloCabecaAlvo = constrain(angulo, 0, 180);
+  cabecaEmMovimento = (anguloCabecaAtual != anguloCabecaAlvo);
+}
 
-unsigned long tempoAreaLivre = 0;
+void atualizarCabeca() {
+  if (!cabecaEmMovimento) return;
+  if (millis() - ultimoPassoCabeca < INTERVALO_PASSO_CABECA_MS) return;
 
-int etapa = 0;
+  ultimoPassoCabeca = millis();
 
-int leiturasAtivacao = 0;
-
-bool areaLivreCronometrando = false;
-
-
-// ============================================================
-// 12. CONTROLE SINCRONIZADO DOS BRACOS
-// ============================================================
-
-int bracoAtual = ANG_BRACO_NEUTRO;
-
-int bracoAlvo = ANG_BRACO_NEUTRO;
-
-unsigned long ultimoPassoBracos = 0;
-
-
-// Calcula a posicao espelhada do servo direito.
-
-int calcularAnguloDireito(int anguloEsquerdo) {
-
-  int anguloDireito;
-
-  if (ESPELHAR_BRACO_DIR) {
-
-    anguloDireito = 180 - anguloEsquerdo;
-
-  } else {
-
-    anguloDireito = anguloEsquerdo;
-
+  if (anguloCabecaAtual < anguloCabecaAlvo) {
+    anguloCabecaAtual += PASSO_CABECA_GRAUS;
+    if (anguloCabecaAtual > anguloCabecaAlvo) anguloCabecaAtual = anguloCabecaAlvo;
+  } else if (anguloCabecaAtual > anguloCabecaAlvo) {
+    anguloCabecaAtual -= PASSO_CABECA_GRAUS;
+    if (anguloCabecaAtual < anguloCabecaAlvo) anguloCabecaAtual = anguloCabecaAlvo;
   }
 
-  anguloDireito += AJUSTE_BRACO_DIR;
-
-  return constrain(anguloDireito, 0, 180);
-
+  cabeca.write(anguloCabecaAtual);
+  cabecaEmMovimento = (anguloCabecaAtual != anguloCabecaAlvo);
 }
 
+// -------------------- 10. CONTROLE SINCRONIZADO DOS BRACOS -----
+// O angulo informado e a referencia do braco esquerdo.
+// O direito e espelhado: 180 - angulo esquerdo.
+// Base 170 -> direito 10; estendido 130 -> direito 50.
+int anguloBracoEsqAtual = ANGULO_BRACOS_BASE;
+int anguloBracoEsqAlvo = ANGULO_BRACOS_BASE;
+bool bracosEmMovimento = false;
+unsigned long ultimoPassoBracos = 0;
+unsigned long fimMovimentoBracos = 0;
 
-// Define a posicao desejada para os dois bracos.
-
-void moverBracosPara(int angulo) {
-
-  bracoAlvo = constrain(angulo, 0, 180);
-
+int anguloEspelhadoDireito(int anguloEsquerdo) {
+  return constrain(180 - anguloEsquerdo, 0, 180);
 }
 
+void escreverBracos(int anguloEsquerdo) {
+  bracoEsq.write(anguloEsquerdo);
+  bracoDir.write(anguloEspelhadoDireito(anguloEsquerdo));
+}
 
-// Atualiza os dois servos simultaneamente,
-// avancando um grau por intervalo.
+void moverBracosPara(int anguloEsquerdo) {
+  anguloBracoEsqAlvo = constrain(anguloEsquerdo, 0, 180);
+  bracosEmMovimento = (anguloBracoEsqAtual != anguloBracoEsqAlvo);
+  if (!bracosEmMovimento) fimMovimentoBracos = millis() + ASSENTAMENTO_BRACOS_MS;
+}
 
 void atualizarBracos() {
-
-  if (bracoAtual == bracoAlvo) {
-    return;
-  }
-
-  if (millis() - ultimoPassoBracos < INTERVALO_PASSO_BRACO_MS) {
-    return;
-  }
+  if (!bracosEmMovimento) return;
+  if (millis() - ultimoPassoBracos < INTERVALO_PASSO_BRACO_MS) return;
 
   ultimoPassoBracos = millis();
 
-  if (bracoAtual < bracoAlvo) {
-
-    bracoAtual += PASSO_BRACO_GRAUS;
-
-    if (bracoAtual > bracoAlvo) {
-      bracoAtual = bracoAlvo;
-    }
-
-  } else {
-
-    bracoAtual -= PASSO_BRACO_GRAUS;
-
-    if (bracoAtual < bracoAlvo) {
-      bracoAtual = bracoAlvo;
-    }
-
+  if (anguloBracoEsqAtual < anguloBracoEsqAlvo) {
+    anguloBracoEsqAtual += PASSO_BRACO_GRAUS;
+    if (anguloBracoEsqAtual > anguloBracoEsqAlvo) anguloBracoEsqAtual = anguloBracoEsqAlvo;
+  } else if (anguloBracoEsqAtual > anguloBracoEsqAlvo) {
+    anguloBracoEsqAtual -= PASSO_BRACO_GRAUS;
+    if (anguloBracoEsqAtual < anguloBracoEsqAlvo) anguloBracoEsqAtual = anguloBracoEsqAlvo;
   }
 
-  // COMANDO DOS DOIS BRACOS NO MESMO CICLO.
+  escreverBracos(anguloBracoEsqAtual);
 
-  bracoEsq.write(bracoAtual);
-
-  bracoDir.write(calcularAnguloDireito(bracoAtual));
-
+  if (anguloBracoEsqAtual == anguloBracoEsqAlvo) {
+    bracosEmMovimento = false;
+    fimMovimentoBracos = millis() + ASSENTAMENTO_BRACOS_MS;
+  }
 }
 
-
-// Verifica se os dois ja receberam a posicao final.
-
-bool bracosConcluidos() {
-
-  return bracoAtual == bracoAlvo;
-
+bool bracosProntos() {
+  return !bracosEmMovimento && (long)(millis() - fimMovimentoBracos) >= 0;
 }
 
-
-// ============================================================
-// 13. LEITURA DO HC-SR04
-// ============================================================
-
-float lerUltrassom() {
-
+// -------------------- 11. SENSOR ULTRASSONICO -----------------
+float medirDistanciaCM() {
   digitalWrite(PIN_TRIG, LOW);
-
   delayMicroseconds(2);
-
   digitalWrite(PIN_TRIG, HIGH);
-
   delayMicroseconds(10);
-
   digitalWrite(PIN_TRIG, LOW);
 
-  long duracao = pulseIn(PIN_ECHO, HIGH, 30000);
-
-  if (duracao == 0) {
-    return 999.0;
-  }
-
-  float distancia = (duracao * 0.0343) / 2.0;
-
-  return distancia;
-
+  unsigned long duracao = pulseIn(PIN_ECHO, HIGH, 25000UL);
+  if (duracao == 0) return -1.0;
+  return (duracao * 0.0343) / 2.0;
 }
 
-
-// ============================================================
-// 14. CONTROLE DOS LEDS
-// ============================================================
-
-void setLED(bool azul, bool vermelho, bool verde) {
-
-  digitalWrite(PIN_LED_AZUL, azul ? HIGH : LOW);
-
-  digitalWrite(PIN_LED_VERMELHO, vermelho ? HIGH : LOW);
-
-  digitalWrite(PIN_LED_VERDE, verde ? HIGH : LOW);
-
+// -------------------- 12. LEDS -------------------------------
+void ledAzul() {
+  digitalWrite(PIN_LED_AZUL, HIGH);
+  digitalWrite(PIN_LED_VERMELHO, LOW);
+  digitalWrite(PIN_LED_VERDE, LOW);
 }
 
-
-void olhosAzuis() {
-
-  setLED(true, false, false);
-
+void ledVermelho() {
+  digitalWrite(PIN_LED_AZUL, LOW);
+  digitalWrite(PIN_LED_VERMELHO, HIGH);
+  digitalWrite(PIN_LED_VERDE, LOW);
 }
 
-
-void olhosVermelhos() {
-
-  setLED(false, true, false);
-
+void ledVerde() {
+  digitalWrite(PIN_LED_AZUL, LOW);
+  digitalWrite(PIN_LED_VERMELHO, LOW);
+  digitalWrite(PIN_LED_VERDE, HIGH);
 }
 
-
-void olhosVerdes() {
-
-  setLED(false, false, true);
-
-}
-
-
-void olhosApagados() {
-
-  setLED(false, false, false);
-
-}
-
-
-// ============================================================
-// 15. CONTROLE DAS RODAS
-// ============================================================
-
+// -------------------- 13. CONTROLE DAS RODAS ------------------
 void pararRodas() {
-
-  rodaEsq.write(RODA_PARADA_ESQ);
-
-  rodaDir.write(RODA_PARADA_DIR);
-
+  rodaEsq.write(RODA_PARADA);
+  rodaDir.write(RODA_PARADA);
 }
-
 
 void avancarRodas() {
-
   rodaEsq.write(RODA_FRENTE_ESQ);
-
   rodaDir.write(RODA_FRENTE_DIR);
-
 }
 
-
-void retornarRodas() {
-
+void recuarRodas() {
   rodaEsq.write(RODA_RE_ESQ);
-
   rodaDir.write(RODA_RE_DIR);
-
 }
 
+void girarRodasDireita() {
+  rodaEsq.write(RODA_GIRO_DIREITA_ESQ);
+  rodaDir.write(RODA_GIRO_DIREITA_DIR);
+}
 
-// ============================================================
-// 16. TRANSICAO DE ESTADOS
-// ============================================================
+void girarRodasEsquerda() {
+  rodaEsq.write(RODA_GIRO_ESQUERDA_ESQ);
+  rodaDir.write(RODA_GIRO_ESQUERDA_DIR);
+}
 
+// -------------------- 14. ESTADOS E PAUSAS --------------------
 void mudarEstado(EstadoECOBOT novoEstado) {
-
-  estadoAtual = novoEstado;
-
-  etapa = 0;
-
-  tempoEstado = millis();
+  estado = novoEstado;
+  inicioEstado = millis();
+  acaoEstadoIniciada = false;
 
   if (DEBUG) {
-
-    Serial.print("NOVO ESTADO: ");
-
-    Serial.println((int)estadoAtual);
-
+    Serial.print("Estado: ");
+    Serial.println((int)estado);
   }
-
 }
 
+void iniciarPausa(EstadoECOBOT proximo) {
+  pararRodas();
+  proximoEstado = proximo;
+  mudarEstado(PAUSA_ETAPA);
+}
 
-// ============================================================
-// 17. POSICAO INICIAL
-// ============================================================
+void reiniciarVarredura() {
+  faseVarredura = IR_ESQUERDA;
+  comandoFaseEnviado = false;
+  inicioFaseVarredura = millis();
+}
 
-void posicaoInicial() {
+// Varredura continua: esquerda -> frente -> direita -> frente.
+void atualizarVarreduraCabeca() {
+  switch (faseVarredura) {
+    case IR_ESQUERDA:
+      if (!comandoFaseEnviado) {
+        moverCabecaPara(ANGULO_CABECA_ESQUERDA);
+        comandoFaseEnviado = true;
+      }
+      if (!cabecaEmMovimento) {
+        inicioFaseVarredura = millis();
+        faseVarredura = PAUSAR_ESQUERDA;
+      }
+      break;
+
+    case PAUSAR_ESQUERDA:
+      if (millis() - inicioFaseVarredura >= TEMPO_OLHADA_LADO_MS) {
+        comandoFaseEnviado = false;
+        faseVarredura = VOLTAR_CENTRO_ESQUERDA;
+      }
+      break;
+
+    case VOLTAR_CENTRO_ESQUERDA:
+      if (!comandoFaseEnviado) {
+        moverCabecaPara(ANGULO_CABECA_FRENTE);
+        comandoFaseEnviado = true;
+      }
+      if (!cabecaEmMovimento) {
+        inicioFaseVarredura = millis();
+        faseVarredura = PAUSAR_CENTRO_ESQUERDA;
+      }
+      break;
+
+    case PAUSAR_CENTRO_ESQUERDA:
+      if (millis() - inicioFaseVarredura >= TEMPO_PAUSA_FRENTE_MS) {
+        comandoFaseEnviado = false;
+        faseVarredura = IR_DIREITA;
+      }
+      break;
+
+    case IR_DIREITA:
+      if (!comandoFaseEnviado) {
+        moverCabecaPara(ANGULO_CABECA_DIREITA);
+        comandoFaseEnviado = true;
+      }
+      if (!cabecaEmMovimento) {
+        inicioFaseVarredura = millis();
+        faseVarredura = PAUSAR_DIREITA;
+      }
+      break;
+
+    case PAUSAR_DIREITA:
+      if (millis() - inicioFaseVarredura >= TEMPO_OLHADA_LADO_MS) {
+        comandoFaseEnviado = false;
+        faseVarredura = VOLTAR_CENTRO_DIREITA;
+      }
+      break;
+
+    case VOLTAR_CENTRO_DIREITA:
+      if (!comandoFaseEnviado) {
+        moverCabecaPara(ANGULO_CABECA_FRENTE);
+        comandoFaseEnviado = true;
+      }
+      if (!cabecaEmMovimento) {
+        inicioFaseVarredura = millis();
+        faseVarredura = PAUSAR_CENTRO_DIREITA;
+      }
+      break;
+
+    case PAUSAR_CENTRO_DIREITA:
+      if (millis() - inicioFaseVarredura >= TEMPO_PAUSA_FRENTE_MS) {
+        comandoFaseEnviado = false;
+        faseVarredura = IR_ESQUERDA;
+      }
+      break;
+  }
+}
+
+// -------------------- 15. SETUP -------------------------------
+void setup() {
+  if (DEBUG) Serial.begin(9600);
+
+  pinMode(PIN_TRIG, OUTPUT);
+  pinMode(PIN_ECHO, INPUT);
+  pinMode(PIN_LED_VERMELHO, OUTPUT);
+  pinMode(PIN_LED_AZUL, OUTPUT);
+  pinMode(PIN_LED_VERDE, OUTPUT);
+
+  rodaEsq.attach(PIN_RODA_ESQ);
+  rodaDir.attach(PIN_RODA_DIR);
+  cabeca.attach(PIN_CABECA);
+  bracoEsq.attach(PIN_BRACO_ESQ);
+  bracoDir.attach(PIN_BRACO_DIR);
 
   pararRodas();
 
-  cabeca.write(ANG_CABECA_CENTRO);
+  anguloCabecaAtual = ANGULO_CABECA_FRENTE;
+  anguloCabecaAlvo = ANGULO_CABECA_FRENTE;
+  cabeca.write(ANGULO_CABECA_FRENTE);
 
-  bracoAtual = ANG_BRACO_NEUTRO;
+  anguloBracoEsqAtual = ANGULO_BRACOS_BASE;
+  anguloBracoEsqAlvo = ANGULO_BRACOS_BASE;
+  escreverBracos(ANGULO_BRACOS_BASE);
+  fimMovimentoBracos = millis() + ASSENTAMENTO_BRACOS_MS;
 
-  bracoAlvo = ANG_BRACO_NEUTRO;
+  ledAzul();
+  reiniciarVarredura();
 
-  bracoEsq.write(ANG_BRACO_NEUTRO);
-
-  bracoDir.write(calcularAnguloDireito(ANG_BRACO_NEUTRO));
-
-  olhosAzuis();
-
+  if (DEBUG) {
+    Serial.println("ECOBOT iniciado - BRL");
+    Serial.println("Aguardando aproximacao a 20 cm ou menos.");
+  }
 }
 
-
-// ============================================================
-// 18. SETUP
-// ============================================================
-
-void setup() {
-
-  Serial.begin(9600);
-
-  // SENSOR
-
-  pinMode(PIN_TRIG, OUTPUT);
-
-  pinMode(PIN_ECHO, INPUT);
-
-  // LEDS
-
-  pinMode(PIN_LED_VERMELHO, OUTPUT);
-
-  pinMode(PIN_LED_AZUL, OUTPUT);
-
-  pinMode(PIN_LED_VERDE, OUTPUT);
-
-  // SERVOS
-
-  rodaEsq.attach(PIN_RODA_ESQ);
-
-  rodaDir.attach(PIN_RODA_DIR);
-
-  cabeca.attach(PIN_CABECA);
-
-  bracoEsq.attach(PIN_BRACO_ESQ);
-
-  bracoDir.attach(PIN_BRACO_DIR);
-
-  // POSICAO INICIAL
-
-  posicaoInicial();
-
-  ultimaLeituraSensor = millis();
-
-  Serial.println("==============================");
-
-  Serial.println("       ECOBOT - BRL");
-
-  Serial.println("   SISTEMA INICIADO");
-
-  Serial.println("   MODO APRESENTACAO LOOP");
-
-  Serial.println("==============================");
-
-}
-
-
-// ============================================================
-// 19. LOOP PRINCIPAL
-// ============================================================
-
+// -------------------- 16. LOOP PRINCIPAL ----------------------
 void loop() {
+  atualizarCabeca();
+  atualizarBracos();
 
   unsigned long agora = millis();
 
-  // Atualiza continuamente os bracos.
+  switch (estado) {
 
-  atualizarBracos();
-
-
-  switch (estadoAtual) {
-
-
-    // ========================================================
-    // ESTADO 1 - AGUARDANDO VISITANTE
-    // ========================================================
-
-    case EST_AGUARDANDO: {
-
+    // AGUARDANDO: o sensor e lido durante a varredura da cabeca.
+    case AGUARDANDO: {
       pararRodas();
+      ledAzul();
+      atualizarVarreduraCabeca();
 
-      olhosAzuis();
+      static unsigned long ultimaLeitura = 0;
+      static byte confirmacoes = 0;
 
-      if (agora - ultimaLeituraSensor >= INTERVALO_SENSOR_MS) {
+      if (agora - ultimaLeitura >= INTERVALO_LEITURA_MS) {
+        ultimaLeitura = agora;
+        float distancia = medirDistanciaCM();
 
-        ultimaLeituraSensor = agora;
+        if (distancia > 0 && distancia <= X1) confirmacoes++;
+        else confirmacoes = 0;
 
-        float distancia = lerUltrassom();
-
-        if (DEBUG) {
-
-          Serial.print("AGUARDANDO - Distancia: ");
-
-          Serial.println(distancia);
-
+        if (DEBUG && distancia > 0) {
+          Serial.print("Distancia: ");
+          Serial.print(distancia);
+          Serial.println(" cm");
         }
 
-        if (distancia > 0 && distancia <= X1) {
-
-          leiturasAtivacao++;
-
-        } else {
-
-          leiturasAtivacao = 0;
-
-        }
-
-        if (leiturasAtivacao >= LEITURAS_PARA_ATIVAR) {
-
-          leiturasAtivacao = 0;
-
-          Serial.println("VISITANTE DETECTADO!");
-
-          mudarEstado(EST_DETECCAO);
-
-        }
-
-      }
-
-      break;
-
-    }
-
-
-    // ========================================================
-    // ESTADO 2 - DETECCAO / SURPRESA
-    // ========================================================
-
-    case EST_DETECCAO: {
-
-      if (etapa == 0) {
-
-        olhosVermelhos();
-
-        cabeca.write(ANG_CABECA_SURPRESA_ESQ);
-
-        etapa = 1;
-
-        tempoEstado = agora;
-
-      }
-
-      else if (etapa == 1 &&
-               agora - tempoEstado >= TEMPO_CABECA_SURPRESA_MS) {
-
-        cabeca.write(ANG_CABECA_SURPRESA_DIR);
-
-        etapa = 2;
-
-        tempoEstado = agora;
-
-      }
-
-      else if (etapa == 2 &&
-               agora - tempoEstado >= TEMPO_CABECA_SURPRESA_MS) {
-
-        cabeca.write(ANG_CABECA_CENTRO);
-
-        mudarEstado(EST_EMOCAO_RAIVA);
-
-      }
-
-      break;
-
-    }
-
-
-    // ========================================================
-    // ESTADO 3 - EMOCAO: INDIGNACAO / RAIVA
-    // ========================================================
-
-    case EST_EMOCAO_RAIVA: {
-
-      if (etapa == 0) {
-
-        olhosVermelhos();
-
-        cabeca.write(ANG_CABECA_RAIVA_ESQ);
-
-        etapa = 1;
-
-        tempoEstado = agora;
-
-      }
-
-      else if (etapa == 1 &&
-               agora - tempoEstado >= TEMPO_CABECA_RAIVA_MS) {
-
-        cabeca.write(ANG_CABECA_RAIVA_DIR);
-
-        etapa = 2;
-
-        tempoEstado = agora;
-
-      }
-
-      else if (etapa == 2 &&
-               agora - tempoEstado >= TEMPO_CABECA_RAIVA_MS) {
-
-        cabeca.write(ANG_CABECA_CENTRO);
-
-        mudarEstado(EST_INSPECAO);
-
-      }
-
-      break;
-
-    }
-
-
-    // ========================================================
-    // ESTADO 4 - INSPECAO DO AMBIENTE
-    // ========================================================
-
-    case EST_INSPECAO: {
-
-      if (etapa == 0) {
-
-        olhosVermelhos();
-
-        cabeca.write(ANG_CABECA_ESQUERDA);
-
-        etapa = 1;
-
-        tempoEstado = agora;
-
-      }
-
-      else if (etapa == 1 &&
-               agora - tempoEstado >= TEMPO_CABECA_INSPECAO_MS) {
-
-        cabeca.write(ANG_CABECA_DIREITA);
-
-        etapa = 2;
-
-        tempoEstado = agora;
-
-      }
-
-      else if (etapa == 2 &&
-               agora - tempoEstado >= TEMPO_CABECA_INSPECAO_MS) {
-
-        cabeca.write(ANG_CABECA_CENTRO);
-
-        etapa = 3;
-
-        tempoEstado = agora;
-
-      }
-
-      else if (etapa == 3 &&
-               agora - tempoEstado >= TEMPO_CABECA_CENTRO_MS) {
-
-        mudarEstado(EST_LOCOMOCAO);
-
-      }
-
-      break;
-
-    }
-
-
-    // ========================================================
-    // ESTADO 5 - LOCOMOCAO PARA FRENTE
-    // ========================================================
-
-    case EST_LOCOMOCAO: {
-
-      if (etapa == 0) {
-
-        olhosVermelhos();
-
-        avancarRodas();
-
-        tempoInicioMovimento = agora;
-
-        etapa = 1;
-
-        Serial.println("ECOBOT AVANCANDO!");
-
-      }
-
-      else if (agora - tempoInicioMovimento >= TEMPO_AVANCO_MS) {
-
-        pararRodas();
-
-        Serial.println("AVANCO CONCLUIDO!");
-
-        mudarEstado(EST_PARADA);
-
-      }
-
-      break;
-
-    }
-
-
-    // ========================================================
-    // ESTADO 6 - PARADA ANTES DA COLETA
-    // ========================================================
-
-    case EST_PARADA: {
-
-      if (etapa == 0) {
-
-        pararRodas();
-
-        olhosAzuis();
-
-        cabeca.write(ANG_CABECA_CENTRO);
-
-        tempoEstado = agora;
-
-        etapa = 1;
-
-      }
-
-      else if (agora - tempoEstado >= PAUSA_ANTES_COLETA_MS) {
-
-        mudarEstado(EST_BRACO_APROXIMACAO);
-
-      }
-
-      break;
-
-    }
-
-
-    // ========================================================
-    // ESTADO 7 - APROXIMACAO DOS BRACOS
-    // ========================================================
-
-    case EST_BRACO_APROXIMACAO: {
-
-      if (etapa == 0) {
-
-        moverBracosPara(ANG_BRACO_APROXIMA);
-
-        etapa = 1;
-
-      }
-
-      else if (bracosConcluidos()) {
-
-        mudarEstado(EST_BRACO_ENCAIXE);
-
-      }
-
-      break;
-
-    }
-
-
-    // ========================================================
-    // ESTADO 8 - ENCAIXE NAS ALCAS
-    // ========================================================
-
-    case EST_BRACO_ENCAIXE: {
-
-      if (etapa == 0) {
-
-        moverBracosPara(ANG_BRACO_ENCAIXE);
-
-        etapa = 1;
-
-      }
-
-      else if (bracosConcluidos()) {
-
-        mudarEstado(EST_PAUSA_ENCAIXE);
-
-      }
-
-      break;
-
-    }
-
-
-    // ========================================================
-    // ESTADO 9 - PAUSA DO ENCAIXE
-    // ========================================================
-
-    case EST_PAUSA_ENCAIXE: {
-
-      if (agora - tempoEstado >= PAUSA_APOS_ENCAIXE_MS) {
-
-        mudarEstado(EST_BRACO_LEVANTAMENTO);
-
-      }
-
-      break;
-
-    }
-
-
-    // ========================================================
-    // ESTADO 10 - LEVANTAMENTO DA LATA
-    // ========================================================
-
-    case EST_BRACO_LEVANTAMENTO: {
-
-      if (etapa == 0) {
-
-        moverBracosPara(ANG_BRACO_LEVANTA);
-
-        etapa = 1;
-
-      }
-
-      else if (bracosConcluidos()) {
-
-        olhosVerdes();
-
-        mudarEstado(EST_EMOCAO_FELIZ);
-
-      }
-
-      break;
-
-    }
-
-
-    // ========================================================
-    // ESTADO 11 - EMOCAO: FELICIDADE
-    // ========================================================
-
-    case EST_EMOCAO_FELIZ: {
-
-      if (etapa == 0) {
-
-        olhosVerdes();
-
-        cabeca.write(ANG_CABECA_FELIZ_ESQ);
-
-        etapa = 1;
-
-        tempoEstado = agora;
-
-      }
-
-      else if (etapa == 1 &&
-               agora - tempoEstado >= TEMPO_CABECA_FELIZ_MS) {
-
-        cabeca.write(ANG_CABECA_FELIZ_DIR);
-
-        etapa = 2;
-
-        tempoEstado = agora;
-
-      }
-
-      else if (etapa == 2 &&
-               agora - tempoEstado >= TEMPO_CABECA_FELIZ_MS) {
-
-        cabeca.write(ANG_CABECA_CENTRO);
-
-        etapa = 3;
-
-        tempoEstado = agora;
-
-      }
-
-      else if (etapa == 3 &&
-               agora - tempoEstado >= TEMPO_CABECA_CENTRO_MS) {
-
-        mudarEstado(EST_BRACO_COLOCA);
-
-      }
-
-      break;
-
-    }
-
-
-    // ========================================================
-    // ESTADO 12 - COLOCAR A LATA
-    // ========================================================
-
-    case EST_BRACO_COLOCA: {
-
-      if (etapa == 0) {
-
-        moverBracosPara(ANG_BRACO_COLOCA);
-
-        etapa = 1;
-
-      }
-
-      else if (bracosConcluidos()) {
-
-        mudarEstado(EST_PAUSA_COLOCA);
-
-      }
-
-      break;
-
-    }
-
-
-    // ========================================================
-    // ESTADO 13 - PAUSA APOS COLOCAR
-    // ========================================================
-
-    case EST_PAUSA_COLOCA: {
-
-      if (agora - tempoEstado >= PAUSA_APOS_COLETA_MS) {
-
-        mudarEstado(EST_BRACO_NEUTRO);
-
-      }
-
-      break;
-
-    }
-
-
-    // ========================================================
-    // ESTADO 14 - BRACOS VOLTAM AO NEUTRO
-    // ========================================================
-
-    case EST_BRACO_NEUTRO: {
-
-      if (etapa == 0) {
-
-        moverBracosPara(ANG_BRACO_NEUTRO);
-
-        etapa = 1;
-
-      }
-
-      else if (bracosConcluidos()) {
-
-        cabeca.write(ANG_CABECA_CENTRO);
-
-        mudarEstado(EST_FINALIZACAO);
-
-      }
-
-      break;
-
-    }
-
-
-    // ========================================================
-    // ESTADO 15 - FINALIZACAO
-    // ========================================================
-
-    case EST_FINALIZACAO: {
-
-      if (etapa == 0) {
-
-        pararRodas();
-
-        olhosVerdes();
-
-        cabeca.write(ANG_CABECA_CENTRO);
-
-        tempoRetornoRestante = TEMPO_RETORNO_MS;
-
-        areaLivreCronometrando = false;
-
-        tempoEstado = agora;
-
-        etapa = 1;
-
-        Serial.println("COLETA CONCLUIDA!");
-
-      }
-
-      else if (agora - tempoEstado >= TEMPO_POSE_FINAL_MS) {
-
-        if (FAZER_RETORNO_AO_INICIO) {
-
-          mudarEstado(EST_AGUARDAR_CAMINHO_LIVRE);
-
-        } else {
-
-          mudarEstado(EST_REARME);
-
-        }
-
-      }
-
-      break;
-
-    }
-
-
-    // ========================================================
-    // ESTADO 16 - AGUARDAR CAMINHO LIVRE
-    // ========================================================
-
-    case EST_AGUARDAR_CAMINHO_LIVRE: {
-
-      pararRodas();
-
-      if (agora - ultimaLeituraSensor >= INTERVALO_SENSOR_MS) {
-
-        ultimaLeituraSensor = agora;
-
-        float distancia = lerUltrassom();
-
-        if (distancia >= DISTANCIA_SEGURANCA_RETORNO_CM) {
-
-          if (!areaLivreCronometrando) {
-
-            tempoAreaLivre = agora;
-
-            areaLivreCronometrando = true;
-
-          }
-
-          else if (agora - tempoAreaLivre >= TEMPO_CAMINHO_LIVRE_MS) {
-
-            if (tempoRetornoRestante > 0) {
-
-              tempoInicioRetorno = agora;
-
-              retornarRodas();
-
-              mudarEstado(EST_RETORNO);
-
-              Serial.println("RETORNO INICIADO!");
-
-            } else {
-
-              mudarEstado(EST_REARME);
-
-            }
-
-          }
-
-        } else {
-
-          areaLivreCronometrando = false;
-
-          Serial.println("CAMINHO OCUPADO - AGUARDANDO");
-
-        }
-
-      }
-
-      break;
-
-    }
-
-
-    // ========================================================
-    // ESTADO 17 - RETORNO AO PONTO INICIAL
-    // ========================================================
-
-    case EST_RETORNO: {
-
-      // Verifica se terminou o tempo de retorno.
-
-      if (agora - tempoInicioRetorno >= tempoRetornoRestante) {
-
-        pararRodas();
-
-        tempoRetornoRestante = 0;
-
-        Serial.println("RETORNO CONCLUIDO!");
-
-        mudarEstado(EST_REARME);
-
-        break;
-
-      }
-
-      // Monitoramento da parte traseira.
-
-      if (agora - ultimaLeituraSensor >= INTERVALO_SENSOR_MS) {
-
-        ultimaLeituraSensor = agora;
-
-        float distancia = lerUltrassom();
-
-        // Se detectar um obstaculo proximo, para.
-
-        if (distancia > 0 &&
-            distancia < DISTANCIA_SEGURANCA_RETORNO_CM) {
-
-          unsigned long tempoDecorrido =
-            agora - tempoInicioRetorno;
-
-          if (tempoDecorrido >= tempoRetornoRestante) {
-
-            tempoRetornoRestante = 0;
-
-          } else {
-
-            tempoRetornoRestante -= tempoDecorrido;
-
-          }
-
+        if (confirmacoes >= LEITURAS_PARA_CONFIRMAR) {
+          confirmacoes = 0;
           pararRodas();
-
-          areaLivreCronometrando = false;
-
-          Serial.println("OBSTACULO DETECTADO NO RETORNO!");
-
-          mudarEstado(EST_AGUARDAR_CAMINHO_LIVRE);
-
+          moverCabecaPara(ANGULO_CABECA_FRENTE);
+          ledVermelho();
+          if (DEBUG) Serial.println("Aproximacao detectada!");
+          mudarEstado(CENTRALIZANDO_CABECA);
         }
-
       }
-
       break;
-
     }
 
-
-    // ========================================================
-    // ESTADO 18 - AGUARDAR VISITANTE SAIR
-    // ========================================================
-
-    case EST_REARME: {
-
+    // Centraliza a cabeca antes de iniciar a sequencia.
+    case CENTRALIZANDO_CABECA:
       pararRodas();
-
-      olhosAzuis();
-
-      cabeca.write(ANG_CABECA_CENTRO);
-
-      if (agora - ultimaLeituraSensor >= INTERVALO_SENSOR_MS) {
-
-        ultimaLeituraSensor = agora;
-
-        float distancia = lerUltrassom();
-
-        if (distancia > X1 + MARGEM_REARME_CM) {
-
-          if (!areaLivreCronometrando) {
-
-            tempoAreaLivre = agora;
-
-            areaLivreCronometrando = true;
-
-          }
-
-          else if (agora - tempoAreaLivre >= TEMPO_REARME_MS) {
-
-            areaLivreCronometrando = false;
-
-            Serial.println("==============================");
-
-            Serial.println("ECOBOT PRONTO PARA NOVO CICLO!");
-
-            Serial.println("==============================");
-
-            mudarEstado(EST_AGUARDANDO);
-
-          }
-
-        } else {
-
-          areaLivreCronometrando = false;
-
-        }
-
-      }
-
+      if (!cabecaEmMovimento) iniciarPausa(AVANCO_INICIAL);
       break;
 
+    // Pausa geral entre etapas.
+    case PAUSA_ETAPA:
+      pararRodas();
+      if (agora - inicioEstado >= PAUSA_ENTRE_ETAPAS_MS) {
+        mudarEstado(proximoEstado);
+      }
+      break;
+
+    // Primeiro avanço: 4 segundos, em velocidade reduzida.
+    case AVANCO_INICIAL:
+      if (!acaoEstadoIniciada) {
+        avancarRodas();
+        tempoEstado = agora;
+        acaoEstadoIniciada = true;
+      }
+      if (agora - tempoEstado >= TEMPO_AVANCO_1_MS) {
+        pararRodas();
+        iniciarPausa(ESTENDENDO_BRACOS);
+      }
+      break;
+
+    // Estende os bracos: esquerdo 130; direito espelhado 50.
+    case ESTENDENDO_BRACOS:
+      pararRodas();
+      if (!acaoEstadoIniciada) {
+        moverBracosPara(ANGULO_BRACOS_ESTENDIDO);
+        acaoEstadoIniciada = true;
+      }
+      if (bracosProntos()) iniciarPausa(GIRO_DIREITA);
+      break;
+
+    // Giro para a direita durante 500 ms.
+    case GIRO_DIREITA:
+      if (!acaoEstadoIniciada) {
+        girarRodasDireita();
+        tempoEstado = agora;
+        acaoEstadoIniciada = true;
+      }
+      if (agora - tempoEstado >= TEMPO_GIRO_MS) {
+        pararRodas();
+        iniciarPausa(SEGUNDO_AVANCO);
+      }
+      break;
+
+    // Segundo avanço: 2,5 segundos.
+    case SEGUNDO_AVANCO:
+      if (!acaoEstadoIniciada) {
+        avancarRodas();
+        tempoEstado = agora;
+        acaoEstadoIniciada = true;
+      }
+      if (agora - tempoEstado >= TEMPO_AVANCO_2_MS) {
+        pararRodas();
+        iniciarPausa(RECOLHENDO_BRACOS);
+      }
+      break;
+
+    // Retorna os bracos para base: esquerdo 170; direito espelhado 10.
+    case RECOLHENDO_BRACOS:
+      pararRodas();
+      if (!acaoEstadoIniciada) {
+        moverBracosPara(ANGULO_BRACOS_BASE);
+        acaoEstadoIniciada = true;
+      }
+      if (bracosProntos()) iniciarPausa(RETORNO_SEGUNDO_TRECHO);
+      break;
+
+    // Retorno do segundo trecho: re por 2,5 segundos.
+    case RETORNO_SEGUNDO_TRECHO:
+      if (!acaoEstadoIniciada) {
+        recuarRodas();
+        tempoEstado = agora;
+        acaoEstadoIniciada = true;
+      }
+      if (agora - tempoEstado >= TEMPO_AVANCO_2_MS) {
+        pararRodas();
+        iniciarPausa(GIRO_ESQUERDA);
+      }
+      break;
+
+    // Desfaz o giro para a esquerda durante os mesmos 500 ms.
+    case GIRO_ESQUERDA:
+      if (!acaoEstadoIniciada) {
+        girarRodasEsquerda();
+        tempoEstado = agora;
+        acaoEstadoIniciada = true;
+      }
+      if (agora - tempoEstado >= TEMPO_GIRO_MS) {
+        pararRodas();
+        iniciarPausa(RETORNO_TRECHO_INICIAL);
+      }
+      break;
+
+    // Retorno do primeiro trecho: re por 4 segundos.
+    case RETORNO_TRECHO_INICIAL:
+      if (!acaoEstadoIniciada) {
+        recuarRodas();
+        tempoEstado = agora;
+        acaoEstadoIniciada = true;
+      }
+      if (agora - tempoEstado >= TEMPO_AVANCO_1_MS) {
+        pararRodas();
+        moverCabecaPara(ANGULO_CABECA_FRENTE);
+        iniciarPausa(FINALIZANDO);
+      }
+      break;
+
+    // Finaliza e espera os servos chegarem a posicao inicial.
+    case FINALIZANDO:
+      pararRodas();
+      if (!cabecaEmMovimento && bracosProntos()) {
+        ledVerde();
+        if (DEBUG) Serial.println("Sequencia concluida. Aguardando area livre.");
+        mudarEstado(AGUARDANDO_VISITANTE_SAIR);
+      }
+      break;
+
+    // Rearma somente depois que o visitante se afastar.
+    case AGUARDANDO_VISITANTE_SAIR: {
+      pararRodas();
+      ledVerde();
+
+      static unsigned long ultimaLeituraRearme = 0;
+      static unsigned long inicioAreaLivre = 0;
+      static bool contandoAreaLivre = false;
+
+      if (agora - ultimaLeituraRearme >= INTERVALO_LEITURA_MS) {
+        ultimaLeituraRearme = agora;
+        float distancia = medirDistanciaCM();
+        bool areaLivre = (distancia < 0 || distancia > DISTANCIA_REARME);
+
+        if (areaLivre) {
+          if (!contandoAreaLivre) {
+            inicioAreaLivre = agora;
+            contandoAreaLivre = true;
+          } else if (agora - inicioAreaLivre >= TEMPO_FORA_PARA_REARMAR_MS) {
+            contandoAreaLivre = false;
+            moverCabecaPara(ANGULO_CABECA_FRENTE);
+            ledAzul();
+            reiniciarVarredura();
+            if (DEBUG) Serial.println("Area livre. Novo ciclo liberado.");
+            mudarEstado(AGUARDANDO);
+          }
+        } else {
+          contandoAreaLivre = false;
+        }
+      }
+      break;
     }
-
   }
-
 }
