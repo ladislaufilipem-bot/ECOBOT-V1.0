@@ -1,0 +1,828 @@
+#include <Servo.h>
+#include <LiquidCrystal.h>
+#include <math.h>
+
+// ============================================================
+// ECOBOT - BRL / BLUE SCHOOL
+// Integracao da rotina original com LCD 1602A e olhos de losango.
+// Inicializacao: ECOBOT INICIANDO + pontos de carregamento.
+// Detectou objeto: olhos raivosos; apos 1,5 s mostra LIXO DETECTADO
+// por 1,5 s. Ao recolher os bracos (soltar o lixo), volta ao normal.
+// ============================================================
+
+// -------------------- 1. PINAGEM -----------------------------
+const byte PIN_TRIG = 7;
+const byte PIN_ECHO = 8;
+
+const byte PIN_RODA_ESQ = 9;
+const byte PIN_RODA_DIR = 10;
+const byte PIN_CABECA = 11;
+const byte PIN_BRACO_ESQ = 12;
+const byte PIN_BRACO_DIR = 13;
+
+const byte PIN_LED_VERMELHO = 2;
+const byte PIN_LED_AZUL = 3;
+const byte PIN_LED_VERDE = 4;
+
+// LCD 1602A sem modulo I2C:
+// RS -> D5 | E -> D6 | D4 -> A0 | D5 -> A1
+// D6 -> A2 | D7 -> A3
+LiquidCrystal lcd(5, 6, A0, A1, A2, A3);
+
+// -------------------- 2. OBJETOS SERVO ------------------------
+Servo rodaEsq;
+Servo rodaDir;
+Servo cabeca;
+Servo bracoEsq;
+Servo bracoDir;
+
+// -------------------- 3. PARAMETROS DA APRESENTACAO -----------
+const float X1 = 20.0; // ativa a sequencia a 20 cm ou menos
+
+// Cabeca
+const int ANGULO_CABECA_FRENTE = 90;
+const int ANGULO_CABECA_ESQUERDA = 180;
+const int ANGULO_CABECA_DIREITA = 0;
+
+// Bracos: lado direito espelhado em relacao ao esquerdo.
+const int ANGULO_BRACOS_BASE = 170;
+const int ANGULO_BRACOS_ESTENDIDO = 130;
+
+// Rodas MG996R 360 graus
+const int RODA_PARADA = 90;
+const int RODA_FRENTE_ESQ = 120;
+const int RODA_FRENTE_DIR = 50;
+const int RODA_RE_ESQ = 60;
+const int RODA_RE_DIR = 132;
+
+// Giro no proprio eixo
+const int RODA_GIRO_DIREITA_ESQ = 120;
+const int RODA_GIRO_DIREITA_DIR = 120;
+const int RODA_GIRO_ESQUERDA_ESQ = 60;
+const int RODA_GIRO_ESQUERDA_DIR = 60;
+
+// -------------------- 4. TEMPOS DA SEQUENCIA ------------------
+const unsigned long TEMPO_OLHADA_LADO_MS = 1700;
+const unsigned long TEMPO_PAUSA_FRENTE_MS = 500;
+
+const unsigned long TEMPO_AVANCO_1_MS = 1500;
+const unsigned long TEMPO_AVANCO_2_MS = 1000;
+const unsigned long TEMPO_GIRO_MS = 3200;
+
+const unsigned long PAUSA_ENTRE_ETAPAS_MS = 500;
+
+// -------------------- 5. SENSOR E REARME -----------------------
+const unsigned long INTERVALO_LEITURA_MS = 100;
+const byte LEITURAS_PARA_CONFIRMAR = 2;
+const float DISTANCIA_REARME = 25.0;
+const unsigned long TEMPO_FORA_PARA_REARMAR_MS = 1500;
+
+// -------------------- 6. SUAVIDADE DOS SERVOS -----------------
+const byte PASSO_CABECA_GRAUS = 1;
+const unsigned long INTERVALO_PASSO_CABECA_MS = 12;
+const byte PASSO_BRACO_GRAUS = 1;
+const unsigned long INTERVALO_PASSO_BRACO_MS = 20;
+const unsigned long ASSENTAMENTO_BRACOS_MS = 250;
+
+const bool DEBUG = true;
+
+// -------------------- 7. LCD / OLHOS --------------------------
+const unsigned long TEMPO_INICIALIZACAO_MS = 2500;
+const unsigned long TEMPO_ATE_MENSAGEM_MS = 1500;
+const unsigned long TEMPO_MENSAGEM_MS = 1500;
+
+// Posicoes-base dos olhos. Cada olho ocupa 2 colunas x 2 linhas.
+const int COLUNA_OLHO_ESQ = 3;
+const int COLUNA_OLHO_DIR = 11;
+
+byte caracteresOlhos[8][8];
+int ultimaColunaE = -1;
+int ultimaColunaD = -1;
+
+bool expressaoRaivosa = false;
+bool mensagemLixoVisivel = false;
+bool mensagemLixoJaExibida = false;
+unsigned long inicioExpressaoRaivosa = 0;
+unsigned long inicioMensagemLixo = 0;
+
+byte etapaAnimacaoOlhos = 0;
+unsigned long proximaAnimacaoOlhos = 0;
+
+// -------------------- 8. ESTADOS ------------------------------
+enum EstadoECOBOT {
+  AGUARDANDO,
+  CENTRALIZANDO_CABECA,
+  AVANCO_INICIAL,
+  PAUSA_ETAPA,
+  ESTENDENDO_BRACOS,
+  GIRO_DIREITA,
+  SEGUNDO_AVANCO,
+  RECOLHENDO_BRACOS,
+  RETORNO_SEGUNDO_TRECHO,
+  GIRO_ESQUERDA,
+  RETORNO_TRECHO_INICIAL,
+  FINALIZANDO,
+  AGUARDANDO_VISITANTE_SAIR
+};
+
+EstadoECOBOT estado = AGUARDANDO;
+EstadoECOBOT proximoEstado = AGUARDANDO;
+unsigned long inicioEstado = 0;
+unsigned long tempoEstado = 0;
+bool acaoEstadoIniciada = false;
+
+// -------------------- 9. VARREDURA DA CABECA ------------------
+enum FaseVarredura {
+  IR_ESQUERDA,
+  PAUSAR_ESQUERDA,
+  VOLTAR_CENTRO_ESQUERDA,
+  PAUSAR_CENTRO_ESQUERDA,
+  IR_DIREITA,
+  PAUSAR_DIREITA,
+  VOLTAR_CENTRO_DIREITA,
+  PAUSAR_CENTRO_DIREITA
+};
+
+FaseVarredura faseVarredura = IR_ESQUERDA;
+unsigned long inicioFaseVarredura = 0;
+bool comandoFaseEnviado = false;
+
+// -------------------- 10. CONTROLE GRADUAL DA CABECA ----------
+int anguloCabecaAtual = ANGULO_CABECA_FRENTE;
+int anguloCabecaAlvo = ANGULO_CABECA_FRENTE;
+bool cabecaEmMovimento = false;
+unsigned long ultimoPassoCabeca = 0;
+
+void moverCabecaPara(int angulo) {
+  anguloCabecaAlvo = constrain(angulo, 0, 180);
+  cabecaEmMovimento = (anguloCabecaAtual != anguloCabecaAlvo);
+}
+
+void atualizarCabeca() {
+  if (!cabecaEmMovimento) return;
+  if (millis() - ultimoPassoCabeca < INTERVALO_PASSO_CABECA_MS) return;
+
+  ultimoPassoCabeca = millis();
+
+  if (anguloCabecaAtual < anguloCabecaAlvo) {
+    anguloCabecaAtual += PASSO_CABECA_GRAUS;
+    if (anguloCabecaAtual > anguloCabecaAlvo) anguloCabecaAtual = anguloCabecaAlvo;
+  } else if (anguloCabecaAtual > anguloCabecaAlvo) {
+    anguloCabecaAtual -= PASSO_CABECA_GRAUS;
+    if (anguloCabecaAtual < anguloCabecaAlvo) anguloCabecaAtual = anguloCabecaAlvo;
+  }
+
+  cabeca.write(anguloCabecaAtual);
+  cabecaEmMovimento = (anguloCabecaAtual != anguloCabecaAlvo);
+}
+
+// -------------------- 11. CONTROLE DOS BRACOS -----------------
+int anguloBracoEsqAtual = ANGULO_BRACOS_BASE;
+int anguloBracoEsqAlvo = ANGULO_BRACOS_BASE;
+bool bracosEmMovimento = false;
+unsigned long ultimoPassoBracos = 0;
+unsigned long fimMovimentoBracos = 0;
+
+int anguloEspelhadoDireito(int anguloEsquerdo) {
+  return constrain(180 - anguloEsquerdo, 0, 180);
+}
+
+void escreverBracos(int anguloEsquerdo) {
+  bracoEsq.write(anguloEsquerdo);
+  bracoDir.write(anguloEspelhadoDireito(anguloEsquerdo));
+}
+
+void moverBracosPara(int anguloEsquerdo) {
+  anguloBracoEsqAlvo = constrain(anguloEsquerdo, 0, 180);
+  bracosEmMovimento = (anguloBracoEsqAtual != anguloBracoEsqAlvo);
+  if (!bracosEmMovimento) fimMovimentoBracos = millis() + ASSENTAMENTO_BRACOS_MS;
+}
+
+void atualizarBracos() {
+  if (!bracosEmMovimento) return;
+  if (millis() - ultimoPassoBracos < INTERVALO_PASSO_BRACO_MS) return;
+
+  ultimoPassoBracos = millis();
+
+  if (anguloBracoEsqAtual < anguloBracoEsqAlvo) {
+    anguloBracoEsqAtual += PASSO_BRACO_GRAUS;
+    if (anguloBracoEsqAtual > anguloBracoEsqAlvo) anguloBracoEsqAtual = anguloBracoEsqAlvo;
+  } else if (anguloBracoEsqAtual > anguloBracoEsqAlvo) {
+    anguloBracoEsqAtual -= PASSO_BRACO_GRAUS;
+    if (anguloBracoEsqAtual < anguloBracoEsqAlvo) anguloBracoEsqAtual = anguloBracoEsqAlvo;
+  }
+
+  escreverBracos(anguloBracoEsqAtual);
+
+  if (anguloBracoEsqAtual == anguloBracoEsqAlvo) {
+    bracosEmMovimento = false;
+    fimMovimentoBracos = millis() + ASSENTAMENTO_BRACOS_MS;
+  }
+}
+
+bool bracosProntos() {
+  return !bracosEmMovimento && (long)(millis() - fimMovimentoBracos) >= 0;
+}
+
+// -------------------- 12. SENSOR ULTRASSONICO -----------------
+float medirDistanciaCM() {
+  digitalWrite(PIN_TRIG, LOW);
+  delayMicroseconds(2);
+  digitalWrite(PIN_TRIG, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(PIN_TRIG, LOW);
+
+  unsigned long duracao = pulseIn(PIN_ECHO, HIGH, 25000UL);
+  if (duracao == 0) return -1.0;
+  return (duracao * 0.0343) / 2.0;
+}
+
+// -------------------- 13. LEDS -------------------------------
+void ledAzul() {
+  digitalWrite(PIN_LED_AZUL, HIGH);
+  digitalWrite(PIN_LED_VERMELHO, LOW);
+  digitalWrite(PIN_LED_VERDE, LOW);
+}
+
+void ledVermelho() {
+  digitalWrite(PIN_LED_AZUL, LOW);
+  digitalWrite(PIN_LED_VERMELHO, HIGH);
+  digitalWrite(PIN_LED_VERDE, LOW);
+}
+
+void ledVerde() {
+  digitalWrite(PIN_LED_AZUL, LOW);
+  digitalWrite(PIN_LED_VERMELHO, LOW);
+  digitalWrite(PIN_LED_VERDE, HIGH);
+}
+
+// -------------------- 14. CONTROLE DAS RODAS ------------------
+void pararRodas() {
+  rodaEsq.write(RODA_PARADA);
+  rodaDir.write(RODA_PARADA);
+}
+
+void avancarRodas() {
+  rodaEsq.write(RODA_FRENTE_ESQ);
+  rodaDir.write(RODA_FRENTE_DIR);
+}
+
+void recuarRodas() {
+  rodaEsq.write(RODA_RE_ESQ);
+  rodaDir.write(RODA_RE_DIR);
+}
+
+void girarRodasDireita() {
+  rodaEsq.write(RODA_GIRO_DIREITA_ESQ);
+  rodaDir.write(RODA_GIRO_DIREITA_DIR);
+}
+
+void girarRodasEsquerda() {
+  rodaEsq.write(RODA_GIRO_ESQUERDA_ESQ);
+  rodaDir.write(RODA_GIRO_ESQUERDA_DIR);
+}
+
+// ============================================================
+// 15. LCD: GERACAO DOS OLHOS DE LOSANGO
+// ============================================================
+
+void criarOlhos(float abertura, bool raivoso) {
+  for (int olho = 0; olho < 2; olho++) {
+    // Inclinacao invertida para parecer raiva, nao tristeza.
+    float angulo = 0.0;
+    if (raivoso) {
+      if (olho == 0) angulo = -0.16;
+      else angulo = 0.16;
+    }
+
+    float c = cos(angulo);
+    float s = sin(angulo);
+    float raioX = raivoso ? 3.4 : 3.6;
+    float raioY = 7.5 * abertura;
+
+    for (int parte = 0; parte < 4; parte++) {
+      int indice = olho * 4 + parte;
+
+      for (int linha = 0; linha < 8; linha++) {
+        byte pixels = 0;
+
+        for (int coluna = 0; coluna < 5; coluna++) {
+          int x = (parte % 2) * 5 + coluna;
+          int y = (parte / 2) * 8 + linha;
+          bool pixel = false;
+
+          if (abertura <= 0.10) {
+            // Piscada: uma linha horizontal, sem outros desenhos.
+            pixel = (y == 7 || y == 8);
+          } else {
+            float dx = x - 4.5;
+            float dy = y - 7.5;
+            float u = dx * c + dy * s;
+            float v = -dx * s + dy * c;
+
+            // Losango preenchido.
+            pixel = (fabs(u) / raioX + fabs(v) / raioY <= 1.0);
+          }
+
+          if (pixel) pixels |= (1 << (4 - coluna));
+        }
+
+        caracteresOlhos[indice][linha] = pixels;
+      }
+    }
+  }
+
+  for (int i = 0; i < 8; i++) {
+    lcd.createChar((byte)i, caracteresOlhos[i]);
+  }
+}
+
+void desenharUmOlho(int coluna, int caractereInicial) {
+  lcd.setCursor(coluna, 0);
+  lcd.write((byte)caractereInicial);
+  lcd.write((byte)(caractereInicial + 1));
+
+  lcd.setCursor(coluna, 1);
+  lcd.write((byte)(caractereInicial + 2));
+  lcd.write((byte)(caractereInicial + 3));
+}
+
+void desenharOlhos(int deslocamento, float abertura, bool raivoso) {
+  deslocamento = constrain(deslocamento, -2, 2);
+  int colunaE = COLUNA_OLHO_ESQ + deslocamento;
+  int colunaD = COLUNA_OLHO_DIR + deslocamento;
+
+  // Apaga os olhos nas posicoes anteriores antes de move-los.
+  if (ultimaColunaE >= 0) {
+    lcd.setCursor(ultimaColunaE, 0); lcd.print("  ");
+    lcd.setCursor(ultimaColunaE, 1); lcd.print("  ");
+    lcd.setCursor(ultimaColunaD, 0); lcd.print("  ");
+    lcd.setCursor(ultimaColunaD, 1); lcd.print("  ");
+  }
+
+  criarOlhos(abertura, raivoso);
+  desenharUmOlho(colunaE, 0);
+  desenharUmOlho(colunaD, 4);
+
+  ultimaColunaE = colunaE;
+  ultimaColunaD = colunaD;
+}
+
+void iniciarExpressaoRaivosa() {
+  expressaoRaivosa = true;
+  inicioExpressaoRaivosa = millis();
+  mensagemLixoVisivel = false;
+  mensagemLixoJaExibida = false;
+  etapaAnimacaoOlhos = 0;
+
+  lcd.clear();
+  ultimaColunaE = -1;
+  ultimaColunaD = -1;
+  desenharOlhos(0, 0.82, true);
+  proximaAnimacaoOlhos = millis() + 450;
+}
+
+void definirExpressaoNormal() {
+  expressaoRaivosa = false;
+  mensagemLixoVisivel = false;
+  mensagemLixoJaExibida = false;
+  etapaAnimacaoOlhos = 0;
+
+  lcd.clear();
+  ultimaColunaE = -1;
+  ultimaColunaD = -1;
+  desenharOlhos(0, 1.0, false);
+  proximaAnimacaoOlhos = millis() + 350;
+}
+
+void animacaoInicialLCD() {
+  unsigned long inicio = millis();
+  const char mensagem[] = "ECOBOT INICIANDO";
+
+  lcd.clear();
+  // Texto digitado da esquerda para a direita.
+  for (int i = 0; i < 16; i++) {
+    lcd.setCursor(i, 0);
+    lcd.print(mensagem[i]);
+    delay(35);
+  }
+
+  // Pontos animados na segunda linha durante os 2,5 s iniciais.
+  byte quantidadePontos = 0;
+  unsigned long ultimoPonto = 0;
+
+  while (millis() - inicio < TEMPO_INICIALIZACAO_MS) {
+    unsigned long agora = millis();
+    if (agora - ultimoPonto >= 350) {
+      ultimoPonto = agora;
+      quantidadePontos = (quantidadePontos + 1) % 4;
+
+      lcd.setCursor(6, 1);
+      lcd.print("   ");
+      lcd.setCursor(6, 1);
+      for (byte i = 0; i < quantidadePontos; i++) lcd.print('.');
+    }
+  }
+
+  // Os olhos aparecem antes de a cabeca iniciar a varredura.
+  lcd.clear();
+  ultimaColunaE = -1;
+  ultimaColunaD = -1;
+  desenharOlhos(0, 1.0, false);
+  delay(400);
+  proximaAnimacaoOlhos = millis() + 250;
+}
+
+void atualizarAnimacaoOlhos(unsigned long agora) {
+  // Mensagem de lixo: aparece 1,5 s depois da deteccao e dura 1,5 s.
+  if (mensagemLixoVisivel) {
+    if (agora - inicioMensagemLixo >= TEMPO_MENSAGEM_MS) {
+      mensagemLixoVisivel = false;
+      lcd.clear();
+      ultimaColunaE = -1;
+      ultimaColunaD = -1;
+      proximaAnimacaoOlhos = agora;
+    } else {
+      return;
+    }
+  }
+
+  if (expressaoRaivosa && !mensagemLixoJaExibida &&
+      agora - inicioExpressaoRaivosa >= TEMPO_ATE_MENSAGEM_MS) {
+    mensagemLixoJaExibida = true;
+    mensagemLixoVisivel = true;
+    inicioMensagemLixo = agora;
+    lcd.clear();
+    ultimaColunaE = -1;
+    ultimaColunaD = -1;
+    lcd.setCursor(1, 0);
+    lcd.print("LIXO DETECTADO");
+    return;
+  }
+
+  if ((long)(agora - proximaAnimacaoOlhos) < 0) return;
+
+  // Olhar para os lados, voltar ao centro e piscar.
+  // A mesma animacao funciona com os losangos normais ou raivosos.
+  const int movimentos[] = { 0, -1, -2, -1, 0, 1, 2, 1, 0, 0 };
+  const float aberturas[] = { 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.05, 1.0 };
+  const unsigned long duracoes[] = { 350, 180, 500, 180, 350, 180, 500, 180, 130, 650 };
+
+  float abertura = aberturas[etapaAnimacaoOlhos];
+  if (expressaoRaivosa && abertura > 0.10) abertura = 0.82;
+
+  desenharOlhos(movimentos[etapaAnimacaoOlhos], abertura, expressaoRaivosa);
+  proximaAnimacaoOlhos = agora + duracoes[etapaAnimacaoOlhos];
+
+  etapaAnimacaoOlhos++;
+  if (etapaAnimacaoOlhos >= 10) etapaAnimacaoOlhos = 0;
+}
+
+// -------------------- 16. ESTADOS E PAUSAS --------------------
+void mudarEstado(EstadoECOBOT novoEstado) {
+  estado = novoEstado;
+  inicioEstado = millis();
+  acaoEstadoIniciada = false;
+
+  if (DEBUG) {
+    Serial.print("Estado: ");
+    Serial.println((int)estado);
+  }
+}
+
+void iniciarPausa(EstadoECOBOT proximo) {
+  pararRodas();
+  proximoEstado = proximo;
+  mudarEstado(PAUSA_ETAPA);
+}
+
+void reiniciarVarredura() {
+  faseVarredura = IR_ESQUERDA;
+  comandoFaseEnviado = false;
+  inicioFaseVarredura = millis();
+}
+
+// Varredura: esquerda -> frente -> direita -> frente.
+void atualizarVarreduraCabeca() {
+  switch (faseVarredura) {
+    case IR_ESQUERDA:
+      if (!comandoFaseEnviado) {
+        moverCabecaPara(ANGULO_CABECA_ESQUERDA);
+        comandoFaseEnviado = true;
+      }
+      if (!cabecaEmMovimento) {
+        inicioFaseVarredura = millis();
+        faseVarredura = PAUSAR_ESQUERDA;
+      }
+      break;
+
+    case PAUSAR_ESQUERDA:
+      if (millis() - inicioFaseVarredura >= TEMPO_OLHADA_LADO_MS) {
+        comandoFaseEnviado = false;
+        faseVarredura = VOLTAR_CENTRO_ESQUERDA;
+      }
+      break;
+
+    case VOLTAR_CENTRO_ESQUERDA:
+      if (!comandoFaseEnviado) {
+        moverCabecaPara(ANGULO_CABECA_FRENTE);
+        comandoFaseEnviado = true;
+      }
+      if (!cabecaEmMovimento) {
+        inicioFaseVarredura = millis();
+        faseVarredura = PAUSAR_CENTRO_ESQUERDA;
+      }
+      break;
+
+    case PAUSAR_CENTRO_ESQUERDA:
+      if (millis() - inicioFaseVarredura >= TEMPO_PAUSA_FRENTE_MS) {
+        comandoFaseEnviado = false;
+        faseVarredura = IR_DIREITA;
+      }
+      break;
+
+    case IR_DIREITA:
+      if (!comandoFaseEnviado) {
+        moverCabecaPara(ANGULO_CABECA_DIREITA);
+        comandoFaseEnviado = true;
+      }
+      if (!cabecaEmMovimento) {
+        inicioFaseVarredura = millis();
+        faseVarredura = PAUSAR_DIREITA;
+      }
+      break;
+
+    case PAUSAR_DIREITA:
+      if (millis() - inicioFaseVarredura >= TEMPO_OLHADA_LADO_MS) {
+        comandoFaseEnviado = false;
+        faseVarredura = VOLTAR_CENTRO_DIREITA;
+      }
+      break;
+
+    case VOLTAR_CENTRO_DIREITA:
+      if (!comandoFaseEnviado) {
+        moverCabecaPara(ANGULO_CABECA_FRENTE);
+        comandoFaseEnviado = true;
+      }
+      if (!cabecaEmMovimento) {
+        inicioFaseVarredura = millis();
+        faseVarredura = PAUSAR_CENTRO_DIREITA;
+      }
+      break;
+
+    case PAUSAR_CENTRO_DIREITA:
+      if (millis() - inicioFaseVarredura >= TEMPO_PAUSA_FRENTE_MS) {
+        comandoFaseEnviado = false;
+        faseVarredura = IR_ESQUERDA;
+      }
+      break;
+  }
+}
+
+// -------------------- 17. SETUP -------------------------------
+void setup() {
+  if (DEBUG) Serial.begin(9600);
+
+  pinMode(PIN_TRIG, OUTPUT);
+  pinMode(PIN_ECHO, INPUT);
+  pinMode(PIN_LED_VERMELHO, OUTPUT);
+  pinMode(PIN_LED_AZUL, OUTPUT);
+  pinMode(PIN_LED_VERDE, OUTPUT);
+
+  rodaEsq.attach(PIN_RODA_ESQ);
+  rodaDir.attach(PIN_RODA_DIR);
+  cabeca.attach(PIN_CABECA);
+  bracoEsq.attach(PIN_BRACO_ESQ);
+  bracoDir.attach(PIN_BRACO_DIR);
+
+  pararRodas();
+
+  anguloCabecaAtual = ANGULO_CABECA_FRENTE;
+  anguloCabecaAlvo = ANGULO_CABECA_FRENTE;
+  cabeca.write(ANGULO_CABECA_FRENTE);
+
+  anguloBracoEsqAtual = ANGULO_BRACOS_BASE;
+  anguloBracoEsqAlvo = ANGULO_BRACOS_BASE;
+  escreverBracos(ANGULO_BRACOS_BASE);
+  fimMovimentoBracos = millis() + ASSENTAMENTO_BRACOS_MS;
+
+  lcd.begin(16, 2);
+  ledAzul();
+  animacaoInicialLCD();
+  reiniciarVarredura();
+
+  if (DEBUG) {
+    Serial.println("ECOBOT iniciado - BRL");
+    Serial.println("Aguardando aproximacao a 20 cm ou menos.");
+  }
+}
+
+// -------------------- 18. LOOP PRINCIPAL ----------------------
+void loop() {
+  atualizarCabeca();
+  atualizarBracos();
+
+  unsigned long agora = millis();
+
+  switch (estado) {
+
+    // AGUARDANDO: sensor lido durante a varredura da cabeca.
+    case AGUARDANDO: {
+      pararRodas();
+      ledAzul();
+      atualizarVarreduraCabeca();
+
+      static unsigned long ultimaLeitura = 0;
+      static byte confirmacoes = 0;
+
+      if (agora - ultimaLeitura >= INTERVALO_LEITURA_MS) {
+        ultimaLeitura = agora;
+        float distancia = medirDistanciaCM();
+
+        if (distancia > 0 && distancia <= X1) confirmacoes++;
+        else confirmacoes = 0;
+
+        if (DEBUG && distancia > 0) {
+          Serial.print("Distancia: ");
+          Serial.print(distancia);
+          Serial.println(" cm");
+        }
+
+        if (confirmacoes >= LEITURAS_PARA_CONFIRMAR) {
+          confirmacoes = 0;
+          pararRodas();
+          iniciarExpressaoRaivosa();
+          moverCabecaPara(ANGULO_CABECA_FRENTE);
+          ledVermelho();
+          if (DEBUG) Serial.println("Aproximacao detectada!");
+          mudarEstado(CENTRALIZANDO_CABECA);
+        }
+      }
+      break;
+    }
+
+    // Centraliza a cabeca antes da sequencia.
+    case CENTRALIZANDO_CABECA:
+      pararRodas();
+      if (!cabecaEmMovimento) iniciarPausa(AVANCO_INICIAL);
+      break;
+
+    // Pausa geral entre etapas.
+    case PAUSA_ETAPA:
+      pararRodas();
+      if (agora - inicioEstado >= PAUSA_ENTRE_ETAPAS_MS) {
+        mudarEstado(proximoEstado);
+      }
+      break;
+
+    // Primeiro avanço: 5,5 segundos (tempo original).
+    case AVANCO_INICIAL:
+      if (!acaoEstadoIniciada) {
+        avancarRodas();
+        tempoEstado = agora;
+        acaoEstadoIniciada = true;
+      }
+      if (agora - tempoEstado >= TEMPO_AVANCO_1_MS) {
+        pararRodas();
+        iniciarPausa(ESTENDENDO_BRACOS);
+      }
+      break;
+
+    // Estende os bracos: esquerdo 130; direito espelhado 50.
+    case ESTENDENDO_BRACOS:
+      pararRodas();
+      if (!acaoEstadoIniciada) {
+        moverBracosPara(ANGULO_BRACOS_ESTENDIDO);
+        acaoEstadoIniciada = true;
+      }
+      if (bracosProntos()) iniciarPausa(GIRO_DIREITA);
+      break;
+
+    // Giro para a direita durante o tempo original de 3,5 s.
+    case GIRO_DIREITA:
+      if (!acaoEstadoIniciada) {
+        girarRodasDireita();
+        tempoEstado = agora;
+        acaoEstadoIniciada = true;
+      }
+      if (agora - tempoEstado >= TEMPO_GIRO_MS) {
+        pararRodas();
+        iniciarPausa(SEGUNDO_AVANCO);
+      }
+      break;
+
+    // Segundo avanço: 3,5 segundos (tempo original).
+    case SEGUNDO_AVANCO:
+      if (!acaoEstadoIniciada) {
+        avancarRodas();
+        tempoEstado = agora;
+        acaoEstadoIniciada = true;
+      }
+      if (agora - tempoEstado >= TEMPO_AVANCO_2_MS) {
+        pararRodas();
+        iniciarPausa(RECOLHENDO_BRACOS);
+      }
+      break;
+
+    // Recolhe os bracos para a base: o ECOBOT solta o lixo.
+    case RECOLHENDO_BRACOS:
+      pararRodas();
+      if (!acaoEstadoIniciada) {
+        moverBracosPara(ANGULO_BRACOS_BASE);
+        acaoEstadoIniciada = true;
+      }
+      if (bracosProntos()) {
+        // O lixo ja foi solto: voltar a expressao normal aqui.
+        definirExpressaoNormal();
+        iniciarPausa(RETORNO_SEGUNDO_TRECHO);
+      }
+      break;
+
+    // Retorno do segundo trecho: re por 3,5 segundos.
+    case RETORNO_SEGUNDO_TRECHO:
+      if (!acaoEstadoIniciada) {
+        recuarRodas();
+        tempoEstado = agora;
+        acaoEstadoIniciada = true;
+      }
+      if (agora - tempoEstado >= TEMPO_AVANCO_2_MS) {
+        pararRodas();
+        iniciarPausa(GIRO_ESQUERDA);
+      }
+      break;
+
+    // Desfaz o giro para a esquerda durante 3,5 segundos.
+    case GIRO_ESQUERDA:
+      if (!acaoEstadoIniciada) {
+        girarRodasEsquerda();
+        tempoEstado = agora;
+        acaoEstadoIniciada = true;
+      }
+      if (agora - tempoEstado >= TEMPO_GIRO_MS) {
+        pararRodas();
+        iniciarPausa(RETORNO_TRECHO_INICIAL);
+      }
+      break;
+
+    // Retorno do primeiro trecho: re por 5,5 segundos.
+    case RETORNO_TRECHO_INICIAL:
+      if (!acaoEstadoIniciada) {
+        recuarRodas();
+        tempoEstado = agora;
+        acaoEstadoIniciada = true;
+      }
+      if (agora - tempoEstado >= TEMPO_AVANCO_1_MS) {
+        pararRodas();
+        moverCabecaPara(ANGULO_CABECA_FRENTE);
+        iniciarPausa(FINALIZANDO);
+      }
+      break;
+
+    // Finaliza e espera os servos chegarem a posicao inicial.
+    case FINALIZANDO:
+      pararRodas();
+      if (!cabecaEmMovimento && bracosProntos()) {
+        ledVerde();
+        if (DEBUG) Serial.println("Sequencia concluida. Aguardando area livre.");
+        mudarEstado(AGUARDANDO_VISITANTE_SAIR);
+      }
+      break;
+
+    // Rearma somente depois que o visitante se afastar.
+    case AGUARDANDO_VISITANTE_SAIR: {
+      pararRodas();
+      ledVerde();
+
+      static unsigned long ultimaLeituraRearme = 0;
+      static unsigned long inicioAreaLivre = 0;
+      static bool contandoAreaLivre = false;
+
+      if (agora - ultimaLeituraRearme >= INTERVALO_LEITURA_MS) {
+        ultimaLeituraRearme = agora;
+        float distancia = medirDistanciaCM();
+        bool areaLivre = (distancia < 0 || distancia > DISTANCIA_REARME);
+
+        if (areaLivre) {
+          if (!contandoAreaLivre) {
+            inicioAreaLivre = agora;
+            contandoAreaLivre = true;
+          } else if (agora - inicioAreaLivre >= TEMPO_FORA_PARA_REARMAR_MS) {
+            contandoAreaLivre = false;
+            moverCabecaPara(ANGULO_CABECA_FRENTE);
+            definirExpressaoNormal();
+            ledAzul();
+            reiniciarVarredura();
+            if (DEBUG) Serial.println("Area livre. Novo ciclo liberado.");
+            mudarEstado(AGUARDANDO);
+          }
+        } else {
+          contandoAreaLivre = false;
+        }
+      }
+      break;
+    }
+  }
+
+  // Atualiza olhos/mensagem sem interromper motores ou servos.
+  atualizarAnimacaoOlhos(millis());
+}
